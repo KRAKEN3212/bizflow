@@ -223,11 +223,18 @@ secrets:
     external: true
 
 configs:
+  # Объекты configs в Swarm неизменяемы, поэтому имя содержит хеш содержимого
+  # каталога monitoring (CONFIG_VERSION вычисляет scripts/deploy.sh): при
+  # изменении файлов создаётся новый объект, и сервисы переключаются на него.
   prometheus_config:
+    name: bizflow_prometheus_${CONFIG_VERSION:-1}
     file: ./monitoring/prometheus.yml
   grafana_datasource:
+    name: bizflow_grafana_datasource_${CONFIG_VERSION:-1}
     file: ./monitoring/grafana/provisioning/datasources/datasource.yml
   grafana_dashboards:
+    name: bizflow_grafana_dashboards_${CONFIG_VERSION:-1}
     file: ./monitoring/grafana/provisioning/dashboards/dashboards.yml
   grafana_dashboard_bizflow:
+    name: bizflow_grafana_dashboard_${CONFIG_VERSION:-1}
     file: ./monitoring/grafana/dashboards/bizflow.json

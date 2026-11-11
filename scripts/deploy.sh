@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 
 export REGISTRY=${REGISTRY:-127.0.0.1:5000}
 export TAG=${TAG:-1.0.0}
+# версия конфигураций мониторинга = хеш их содержимого (см. configs в docker-stack.yml)
+CONFIG_VERSION=$(find monitoring -type f -exec sha1sum {} + | sort -k2 | sha1sum | cut -c1-10)
+export CONFIG_VERSION
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   docker build --build-arg APP_VERSION="$TAG" -t "$REGISTRY/bizflow-api:$TAG" backend

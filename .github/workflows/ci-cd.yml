@@ -157,5 +157,5 @@ jobs:
             cd /opt/bizflow
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
             export REGISTRY=${{ needs.build.outputs.registry }} TAG=${{ needs.build.outputs.tag }}
-            docker stack deploy --with-registry-auth -c docker-stack.yml bizflow
+            SKIP_BUILD=1 bash scripts/deploy.sh
             TIMEOUT=300 bash scripts/check-deploy.sh
