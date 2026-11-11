@@ -102,8 +102,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Сведения о машине
         run: |
-          echo "Узел: $(hostname), $(nproc) vCPU, $(free -h | awk '/Mem/ {print $2}') ОЗУ"
-          docker version --format 'Docker Engine {{.Server.Version}}'
+          mkdir -p out
+          { echo "Узел: $(hostname), $(nproc) vCPU, $(free -h | awk '/Mem/ {print $2}') ОЗУ"
+            grep PRETTY_NAME /etc/os-release
+            docker version --format 'Docker Engine {{.Server.Version}}'
+            echo "REGISTRY=$REGISTRY TAG=$TAG"; } | tee out/01-machine.txt
       - name: Вход в GitHub Container Registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Инициализация Swarm и секретов
@@ -114,22 +117,44 @@ jobs:
             openssl rand -hex 24 | docker secret create "$s" -
           done
       - name: Развёртывание стека
-        run: docker stack deploy --with-registry-auth -c docker-stack.yml bizflow
+        run: |
+          set -o pipefail
+          docker stack deploy --with-registry-auth -c docker-stack.yml bizflow | tee out/02-deploy.txt
       - name: Проверка результата развёртывания
-        run: TIMEOUT=300 bash scripts/check-deploy.sh
+        run: |
+          set -o pipefail
+          TIMEOUT=300 bash scripts/check-deploy.sh | tee out/03-check.txt
       - name: Тестовые данные
-        run: docker exec "$(docker ps -qf name=bizflow_api | head -1)" python -m app.seed
+        run: docker exec "$(docker ps -qf name=bizflow_api | head -1)" python -m app.seed | tee out/04-seed.txt
       - name: Дымовой тест
-        run: python3 scripts/smoke.py --url http://127.0.0.1
+        run: |
+          set -o pipefail
+          python3 scripts/smoke.py --url http://127.0.0.1 | tee out/05-smoke.txt
       - name: Масштабирование api до 5 реплик и нагрузка
         run: |
-          docker service scale --detach=false bizflow_api=5
-          python3 scripts/loadtest.py --url http://127.0.0.1 --threads 10 --seconds 20
+          set -o pipefail
+          docker service scale --detach=false bizflow_api=5 > /dev/null
+          docker service ps bizflow_api --filter desired-state=running --format '{{.Name}}  {{.Image}}  {{.CurrentState}}' | tee out/06-scale.txt
+          python3 scripts/loadtest.py --url http://127.0.0.1 --threads 10 --seconds 20 | tee out/07-load.txt
       - name: Состояние стека
         if: always()
         run: |
-          docker stack services bizflow || true
-          docker stack ps bizflow --no-trunc --format '{{.Name}} | {{.Image}} | {{.CurrentState}} | {{.Error}}' || true
+          { docker stack services bizflow
+            echo
+            docker stack ps bizflow --no-trunc --format '{{.Name}} | {{.Image}} | {{.CurrentState}} | {{.Error}}'; } | tee out/08-stack.txt || true
+      - name: Итоги в сводку прогона
+        # сводка (Job Summary) видна на странице прогона без входа в GitHub
+        if: always()
+        run: |
+          {
+            echo "## Развёртывание в облачной среде GitHub Actions"
+            for f in out/*.txt; do
+              echo "### $(basename "$f" .txt)"
+              echo '```'
+              cat "$f"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Развёртывание на постоянный сервер
