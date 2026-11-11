@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  # Каждая реплика API опрашивается отдельно. Список адресов берётся
+  # из DNS Swarm: имя tasks.api возвращает IP всех запущенных задач сервиса,
+  # поэтому после docker service scale новые реплики попадают в мониторинг сами.
+  - job_name: bizflow-api
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names: ["tasks.api"]
+        type: A
+        port: 8000
+        refresh_interval: 15s
+
+  - job_name: traefik
+    static_configs:
+      - targets: ["traefik:8082"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

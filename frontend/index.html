@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BizFlow — автоматизация бизнеса</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- экран входа -->
+  <section id="auth-view" class="auth hidden">
+    <div class="auth-card">
+      <div class="logo">Biz<span>Flow</span></div>
+      <p class="muted">SaaS-платформа для автоматизации продаж и задач</p>
+      <div class="tabs">
+        <button class="tab active" data-auth="login">Вход</button>
+        <button class="tab" data-auth="register">Регистрация компании</button>
+      </div>
+      <form id="login-form">
+        <label>E-mail<input name="email" type="email" required value="admin@bizflow-demo.ru"></label>
+        <label>Пароль<input name="password" type="password" required></label>
+        <button class="btn primary" type="submit">Войти</button>
+      </form>
+      <form id="register-form" class="hidden">
+        <label>Название компании<input name="company_name" required></label>
+        <label>Ваше имя<input name="full_name" required></label>
+        <label>E-mail<input name="email" type="email" required></label>
+        <label>Пароль<input name="password" type="password" minlength="6" required></label>
+        <button class="btn primary" type="submit">Создать аккаунт</button>
+      </form>
+      <div id="auth-error" class="error"></div>
+    </div>
+  </section>
+
+  <!-- рабочая область -->
+  <div id="app-view" class="layout hidden">
+    <aside class="sidebar">
+      <div class="logo">Biz<span>Flow</span></div>
+      <nav>
+        <a href="#dashboard" data-page="dashboard">Сводка</a>
+        <a href="#clients" data-page="clients">Клиенты</a>
+        <a href="#deals" data-page="deals">Сделки</a>
+        <a href="#tasks" data-page="tasks">Задачи</a>
+        <a href="#events" data-page="events">Автоматизация</a>
+        <a href="#users" data-page="users" class="admin-only">Сотрудники</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="me-name"></div>
+        <div id="me-company" class="muted"></div>
+        <button id="logout" class="btn link">Выйти</button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <h1 id="page-title">Сводка</h1>
+        <div class="instance" title="Реплика API, которая ответила на последний запрос">
+          реплика API: <code id="instance">—</code>
+        </div>
+      </header>
+
+      <section data-view="dashboard">
+        <div class="cards" id="stat-cards"></div>
+        <div class="panel">
+          <h3>Сделки по этапам</h3>
+          <div id="stage-bars"></div>
+        </div>
+      </section>
+
+      <section data-view="clients" class="hidden">
+        <div class="toolbar">
+          <input id="client-search" placeholder="Поиск по имени, e-mail или телефону">
+          <button class="btn primary" data-new="client">+ Клиент</button>
+        </div>
+        <table class="grid"><thead><tr>
+          <th>Название</th><th>E-mail</th><th>Телефон</th><th>Добавлен</th><th></th>
+        </tr></thead><tbody id="clients-body"></tbody></table>
+      </section>
+
+      <section data-view="deals" class="hidden">
+        <div class="toolbar">
+          <select id="deal-filter">
+            <option value="">Все этапы</option>
+            <option value="new">Новая</option>
+            <option value="negotiation">Переговоры</option>
+            <option value="won">Успешно</option>
+            <option value="lost">Отказ</option>
+          </select>
+          <button class="btn primary" data-new="deal">+ Сделка</button>
+        </div>
+        <table class="grid"><thead><tr>
+          <th>Сделка</th><th>Клиент</th><th class="num">Сумма, ₽</th><th>Этап</th><th></th>
+        </tr></thead><tbody id="deals-body"></tbody></table>
+      </section>
+
+      <section data-view="tasks" class="hidden">
+        <div class="toolbar">
+          <span class="muted">Задачи с меткой «авто» созданы правилами автоматизации</span>
+          <button class="btn primary" data-new="task">+ Задача</button>
+        </div>
+        <table class="grid"><thead><tr>
+          <th></th><th>Задача</th><th>Срок</th><th>Источник</th><th></th>
+        </tr></thead><tbody id="tasks-body"></tbody></table>
+      </section>
+
+      <section data-view="events" class="hidden">
+        <p class="muted">Последние события, обработанные фоновым воркером. В колонке «Обработал» видно, какая реплика воркера взяла событие из очереди.</p>
+        <table class="grid"><thead><tr>
+          <th>Время</th><th>Событие</th><th>Данные</th><th>Обработал</th>
+        </tr></thead><tbody id="events-body"></tbody></table>
+      </section>
+
+      <section data-view="users" class="hidden">
+        <div class="toolbar"><span></span><button class="btn primary" data-new="user">+ Сотрудник</button></div>
+        <table class="grid"><thead><tr>
+          <th>Имя</th><th>E-mail</th><th>Роль</th>
+        </tr></thead><tbody id="users-body"></tbody></table>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="modal">
+    <form id="modal-form" method="dialog">
+      <h3 id="modal-title"></h3>
+      <div id="modal-fields"></div>
+      <div class="error" id="modal-error"></div>
+      <div class="modal-actions">
+        <button class="btn" value="cancel" formnovalidate>Отмена</button>
+        <button class="btn primary" id="modal-save" value="save">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
