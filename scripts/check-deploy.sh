@@ -17,6 +17,7 @@ deadline=$((SECONDS + TIMEOUT))
 
 fail() {
   trap - ERR
+  set +e +o pipefail
   echo "ОШИБКА: $*"
   if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
     errors=$(docker service ls --format '{{.Name}}' | while read -r s; do
@@ -49,10 +50,20 @@ while true; do
   sleep 5
 done
 
-# -f: ответ 503 (нет базы данных) считается ошибкой
-health=$(curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$URL/api/health") \
-  || fail "/api/health не ответил кодом 200"
+# Реплики уже запущены, но Traefik подхватывает маршруты и проверяет здоровье
+# реплик с интервалом в несколько секунд, поэтому запрос повторяется до общего
+# таймаута. Ответ 503 (нет базы данных) считается неуспешным.
+while true; do
+  code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 5 "$URL/api/health" || true)
+  health=$(cat /tmp/health.json 2>/dev/null || true)
+  if [ "$code" = "200" ] && echo "$health" | grep -q "\"version\":\"${TAG}\""; then
+    break
+  fi
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    fail "/api/health не ответил версией $TAG с кодом 200 (последний ответ: код $code, $health)"
+  fi
+  sleep 3
+done
 echo "$health"
-echo "$health" | grep -q "\"version\":\"${TAG}\"" || fail "/api/health отвечает не версией $TAG: $health"
 echo "Развёртывание версии $TAG подтверждено"
 docker stack services "$STACK"
