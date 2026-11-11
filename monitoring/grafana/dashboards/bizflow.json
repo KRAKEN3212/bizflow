@@ -30,10 +30,11 @@
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
     {
-      "id": 4, "type": "stat", "title": "Доля ошибок 5xx",
+      "id": 4, "type": "stat", "title": "Доля ошибок 5xx (Traefik)",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "refId": "A", "expr": "sum(rate(bizflow_http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum(rate(bizflow_http_requests_total[1m])), 0.001) or vector(0)" }],
+      "description": "Считается по ответам Traefik, поэтому учитывает и ошибки самого прокси (502, 504), и ошибки приложения. Запросы, которые клиент бросил по таймауту, сюда не попадают.",
+      "targets": [{ "refId": "A", "expr": "(sum(rate(traefik_service_requests_total{service=\"api@swarm\",code=~\"5..\"}[1m])) or vector(0)) / clamp_min(sum(rate(traefik_service_requests_total{service=\"api@swarm\"}[1m])), 0.001)" }],
       "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 } },
       "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
     },

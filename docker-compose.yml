@@ -18,6 +18,10 @@ services:
   worker:
     image: ${REGISTRY:-127.0.0.1:5000}/bizflow-api:${TAG:-1.0.0}
     command: ["python", "-m", "app.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/worker-heartbeat') < 30 else 1)"]
+      interval: 15s
+      start_period: 30s
     environment:
       DB_HOST: postgres
       DB_PASSWORD: devpassword
@@ -48,3 +52,4 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "volatile-lru"]

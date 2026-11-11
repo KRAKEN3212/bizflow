@@ -17,8 +17,30 @@
 | prometheus  | prom/prometheus:v2.53.0      | сбор метрик :9090                                 | 1       |
 | grafana     | grafana/grafana:11.1.0       | дашборд :3000                                     | 1       |
 
-Сети: `public` (Traefik, frontend, api, мониторинг) и `backend` (internal: api, worker,
-postgres, redis, prometheus). Секреты Swarm: `db_password`, `jwt_secret`, `grafana_password`.
+Сети: `public` (Traefik, frontend, api, Prometheus, Grafana) и `backend` с флагом `internal`
+(api, worker, postgres, redis, Prometheus). К обеим сетям подключены только api и Prometheus.
+Опубликованные порты: 80 и 8081 (Traefik), 3000 (Grafana), 9090 (Prometheus), 5000 (реестр).
+Секреты Swarm: `db_password`, `jwt_secret`, `grafana_password`.
+
+## Проверка готовности и очередь событий
+
+`GET /api/health` отвечает 200, если реплика может работать, и 503, если недоступен
+PostgreSQL. Код 503 исключает реплику из балансировки Traefik и делает контейнер
+unhealthy. Недоступный Redis даёт статус `degraded` с кодом 200: кэш статистики не
+используется, правила автоматизации выполняются сразу в процессе API.
+
+Очередь построена по схеме «надёжной очереди» Redis: воркер забирает событие командой
+BLMOVE в список `bizflow:processing` и удаляет его оттуда только после записи в базу.
+Зависшие события (воркер упал) через 60 секунд возвращаются в очередь, после пяти
+неудачных попыток событие попадает в `bizflow:dead`. Доставка выполняется «хотя бы
+один раз»; повтор не создаёт дубликатов, потому что у каждого события есть
+идентификатор с уникальным индексом в таблице `event_log`.
+
+Ограничения: событие отправляется в Redis после фиксации транзакции, и при падении
+реплики API между этими действиями оно теряется (transactional outbox не реализован);
+Redis сохраняет журнал AOF раз в секунду, поэтому при аварии самого Redis могут
+пропасть события последней секунды. Redis использует политику `volatile-lru`:
+вытесняются только ключи кэша со сроком жизни, списки очереди не вытесняются.
 
 ## Структура репозитория
 
@@ -28,7 +50,7 @@ backend/                 серверная часть (FastAPI)
   app/routers/           auth.py (вход, пользователи), crm.py (CRUD), system.py (health, stats)
   app/models.py          модели SQLAlchemy
   app/security.py        bcrypt, JWT, проверка ролей
-  app/events.py          публикация событий в Redis
+  app/events.py          очередь событий в Redis (публикация, взятие, подтверждение, возврат)
   app/automation.py      правила автоматизации
   app/worker.py          фоновый воркер
   app/seed.py            тестовые данные
@@ -36,7 +58,8 @@ backend/                 серверная часть (FastAPI)
   Dockerfile
 frontend/                клиентская часть (HTML + JS) и конфигурация nginx
 monitoring/              prometheus.yml, источник данных и дашборд Grafana
-scripts/                 подготовка кластера, деплой, нагрузочный тест
+scripts/                 подготовка кластера, деплой и его проверка, дымовой и нагрузочный тесты,
+                         измерение доступности
 docker-compose.yml       локальная разработка на одной машине
 docker-stack.yml         описание стека для Docker Swarm
 .github/workflows/       конвейер CI/CD
@@ -77,6 +100,9 @@ docker service rollback bizflow_api                # ручной откат
 docker node update --availability drain worker-1   # вывод узла на обслуживание
 docker service logs -f bizflow_worker              # журналы
 python scripts/loadtest.py --threads 20 --seconds 60
+python scripts/availability.py --seconds 120      # доступность во время обновления
+TAG=1.2.0 bash scripts/check-deploy.sh             # проверка результата деплоя
+python scripts/smoke.py                            # дымовой тест
 ```
 
 Резервная копия базы:
@@ -87,9 +113,17 @@ docker exec $(docker ps -qf name=bizflow_postgres) pg_dump -U bizflow bizflow > 
 
 ## CI/CD
 
-`.github/workflows/ci-cd.yml`: линтер и тесты, сборка образов и публикация в GHCR,
-развёртывание на менеджер-узел по SSH. Для деплоя в репозитории нужны секреты
-`SWARM_HOST`, `SWARM_USER`, `SWARM_SSH_KEY`, `GHCR_TOKEN`.
+`.github/workflows/ci-cd.yml`:
+
+1. `test` — ruff, тесты pytest, проверка синтаксиса `docker-stack.yml`;
+2. `build` — сборка образов и публикация в GHCR с тегом `1.0.<номер запуска>-<sha>`;
+3. `cloud-test` — временный кластер Swarm на облачной виртуальной машине GitHub Actions:
+   развёртывание стека из опубликованных образов, `check-deploy.sh`, тестовые данные,
+   дымовой тест, масштабирование до пяти реплик и короткая нагрузка;
+4. `deploy` — обновление стека на постоянном сервере по SSH и `check-deploy.sh`.
+   Выполняется, только если в репозитории заданы секреты `SWARM_HOST`, `SWARM_USER`,
+   `SWARM_SSH_KEY`, `GHCR_TOKEN`; постоянного сервера у проекта пока нет, поэтому
+   этот этап пропускается.
 
 ## Тесты
 

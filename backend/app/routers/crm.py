@@ -89,6 +89,9 @@ def create_deal(data: DealIn, user: User = Depends(current_user), db: Session = 
     db.add(deal)
     db.commit()
     cache.invalidate_stats(user.company_id)
+    # сделка может быть заведена сразу закрытой — правило срабатывает и в этом случае
+    if deal.stage in ("won", "lost"):
+        publish(f"deal.{deal.stage}", user.company_id, deal_id=deal.id)
     return _deal_out(deal)
 
 

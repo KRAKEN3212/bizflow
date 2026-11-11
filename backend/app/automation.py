@@ -1,13 +1,29 @@
-"""Правила автоматизации бизнес-процессов."""
+"""Правила автоматизации бизнес-процессов.
+
+Каждое событие несёт уникальный идентификатор. Задача и строка журнала
+event_log записываются в одной транзакции, а на event_log.event_id стоит
+уникальный индекс. Поэтому повторная доставка того же события (после сбоя
+воркера или возврата из очереди) не создаёт вторую задачу."""
 import json
+import logging
 from datetime import date, timedelta
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import Deal, EventLog, Task
 
+log = logging.getLogger("bizflow.automation")
 
-def handle_event(db: Session, event: dict, processed_by: str) -> None:
+
+def handle_event(db: Session, event: dict, processed_by: str) -> bool:
+    """Выполняет правило. Возвращает False, если событие уже было обработано."""
+    event_id = event.get("id")
+    if event_id and db.scalar(select(EventLog.id).where(EventLog.event_id == event_id)):
+        log.info("Событие %s уже обработано, повтор пропущен", event_id)
+        return False
+
     kind = event["kind"]
     company_id = event["company_id"]
 
@@ -38,9 +54,17 @@ def handle_event(db: Session, event: dict, processed_by: str) -> None:
         ))
 
     db.add(EventLog(
+        event_id=event_id,
         company_id=company_id,
         kind=kind,
         payload=json.dumps(event, ensure_ascii=False),
         processed_by=processed_by,
     ))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # то же событие одновременно обработал другой воркер
+        db.rollback()
+        log.info("Событие %s уже записано другим воркером", event_id)
+        return False
+    return True

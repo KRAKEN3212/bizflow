@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from .. import cache
 from ..config import settings
 from ..db import get_db
-from ..events import QUEUE, get_redis
+from ..events import DEAD, PROCESSING, QUEUE, get_redis
 from ..models import Client, Deal, Task, User
 from ..security import current_user
 
@@ -14,9 +14,14 @@ router = APIRouter(tags=["system"])
 
 
 @router.get("/api/health")
-def health(db: Session = Depends(get_db)):
-    """Проверка живости. Используется HEALTHCHECK контейнера и балансировщиком.
-    Поле instance показывает, какая реплика обработала запрос."""
+def health(response: Response, db: Session = Depends(get_db)):
+    """Проверка готовности. Используется HEALTHCHECK контейнера, балансировщиком
+    и конвейером CI/CD. Поле instance показывает, какая реплика ответила.
+
+    Без PostgreSQL реплика работать не может: ответ 503, и Traefik с Docker
+    исключают её из обслуживания. Без Redis реплика остаётся рабочей: кэш
+    статистики не используется, а правила автоматизации выполняются сразу в
+    процессе API. Поэтому недоступный Redis даёт статус degraded с кодом 200."""
     db_ok = True
     try:
         db.execute(text("SELECT 1"))
@@ -29,8 +34,13 @@ def health(db: Session = Depends(get_db)):
             redis_ok = bool(r.ping())
         except Exception:
             redis_ok = False
+    if not db_ok:
+        response.status_code = 503
+        status = "unavailable"
+    else:
+        status = "degraded" if redis_ok is False else "ok"
     return {
-        "status": "ok" if db_ok else "degraded",
+        "status": status,
         "instance": settings.hostname,
         "version": settings.version,
         "database": db_ok,
@@ -69,6 +79,8 @@ def stats(user: User = Depends(current_user), db: Session = Depends(get_db)):
     if r is not None:
         try:
             data["queue_length"] = r.llen(QUEUE)
+            data["queue_processing"] = r.llen(PROCESSING)
+            data["queue_dead"] = r.llen(DEAD)
         except Exception:
             data["queue_length"] = None
     cache.set_stats(cid, data)

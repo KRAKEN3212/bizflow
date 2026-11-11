@@ -46,6 +46,11 @@ def init_schema() -> None:
             with engine.begin() as conn:
                 conn.execute(text("SELECT pg_advisory_xact_lock(424242)"))
                 Base.metadata.create_all(bind=conn)
+                # миграция для баз, созданных версией 1.0/1.1: идентификатор события
+                # с уникальным индексом защищает от повторной обработки
+                conn.execute(text("ALTER TABLE event_log ADD COLUMN IF NOT EXISTS event_id VARCHAR(32)"))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_event_log_event_id ON event_log (event_id)"))
             return
         except OperationalError as exc:
             log.warning("База данных недоступна (попытка %s/30): %s", attempt, exc.orig)

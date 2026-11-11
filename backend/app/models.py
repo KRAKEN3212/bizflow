@@ -79,6 +79,7 @@ class EventLog(Base):
     __tablename__ = "event_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
     company_id: Mapped[int] = mapped_column(Integer, index=True)
     kind: Mapped[str] = mapped_column(String(50))
     payload: Mapped[str] = mapped_column(Text)

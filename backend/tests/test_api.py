@@ -1,14 +1,7 @@
-import os
-import tempfile
+import pytest
+from fastapi.testclient import TestClient
 
-_db_file = os.path.join(tempfile.mkdtemp(), "test.db")
-os.environ["DATABASE_URL"] = f"sqlite:///{_db_file}"
-os.environ.pop("REDIS_URL", None)
-
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app.main import app  # noqa: E402
+from app.main import app
 
 
 @pytest.fixture(scope="module")
@@ -69,6 +62,30 @@ def test_deal_won_creates_task(client):
     assert any(t["deal_id"] == d["id"] and t["source"] == "automation" for t in tasks)
     stats = client.get("/api/stats", headers=h).json()
     assert stats["won_amount"] == 1000
+
+
+def test_deal_created_as_won_creates_task(client):
+    h = _register(client, "wonnow@test.ru")
+    d = client.post("/api/deals", json={"title": "Сразу успешно", "amount": 500, "stage": "won"}, headers=h).json()
+    tasks = client.get("/api/tasks", headers=h).json()
+    assert any(t["deal_id"] == d["id"] and t["source"] == "automation" for t in tasks)
+
+
+def test_health_returns_503_without_database(client):
+    from app.db import get_db
+    from app.main import app as fastapi_app
+
+    class BrokenSession:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("нет соединения с БД")
+
+    fastapi_app.dependency_overrides[get_db] = lambda: BrokenSession()
+    try:
+        r = client.get("/api/health")
+    finally:
+        fastapi_app.dependency_overrides.clear()
+    assert r.status_code == 503
+    assert r.json()["status"] == "unavailable"
 
 
 def test_tenant_isolation(client):

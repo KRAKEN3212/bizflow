@@ -59,9 +59,30 @@ $("#login-form").addEventListener("submit", (e) => { e.preventDefault(); submitA
 $("#register-form").addEventListener("submit", (e) => { e.preventDefault(); submitAuth(e.target, "/auth/register"); });
 $("#logout").addEventListener("click", logout);
 
+// Сброс всего, что осталось от предыдущего пользователя: кэшей списков и
+// уже отрисованных таблиц. Иначе после смены пользователя на экране и в
+// формах на мгновение остались бы данные чужой компании.
+function resetState() {
+  me = null;
+  clientsCache = [];
+  dealsCache = [];
+  window._tasks = [];
+  for (const id of ["#clients-body", "#deals-body", "#tasks-body", "#events-body", "#users-body", "#stat-cards", "#stage-bars"]) {
+    $(id).innerHTML = "";
+  }
+  $("#client-search").value = "";
+  $("#deal-filter").value = "";
+  $("#instance").textContent = "—";
+  $("#me-name").textContent = "";
+  $("#me-company").textContent = "";
+}
+
 function logout() {
   token = null;
   localStorage.removeItem("bizflow_token");
+  resetState();
+  if ($("#modal").open) $("#modal").close();
+  history.replaceState(null, "", location.pathname);
   $("#app-view").classList.add("hidden");
   $("#auth-view").classList.remove("hidden");
 }
@@ -230,6 +251,7 @@ async function openForm(kind, obj = null) {
 
 async function start() {
   if (!token) { logout(); return; }
+  resetState();
   try {
     me = await api("/auth/me");
   } catch { logout(); return; }

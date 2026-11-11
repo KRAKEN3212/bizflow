@@ -12,6 +12,7 @@ services:
       - --providers.swarm.endpoint=unix:///var/run/docker.sock
       - --providers.swarm.exposedByDefault=false
       - --providers.swarm.network=bizflow_public
+      - --providers.swarm.refreshSeconds=5
       - --entrypoints.web.address=:80
       - --entrypoints.metrics.address=:8082
       - --metrics.prometheus.entryPoint=metrics
@@ -60,6 +61,7 @@ services:
       STATS_CACHE_TTL: "30"
     secrets: [db_password, jwt_secret]
     networks: [public, backend]
+    stop_grace_period: 20s
     deploy:
       replicas: 3
       labels:
@@ -70,6 +72,10 @@ services:
         - traefik.http.services.api.loadbalancer.server.port=8000
         - traefik.http.services.api.loadbalancer.healthcheck.path=/api/health
         - traefik.http.services.api.loadbalancer.healthcheck.interval=5s
+        # если реплика уже остановлена, а Traefik ещё не исключил её, запрос
+        # повторяется на другой реплике вместо ответа 502
+        - traefik.http.middlewares.api-retry.retry.attempts=3
+        - traefik.http.routers.api.middlewares=api-retry
       update_config:
         parallelism: 1
         delay: 10s
@@ -86,8 +92,15 @@ services:
     image: *api_image
     command: ["python", "-m", "app.worker"]
     hostname: "worker-{{.Task.Slot}}.{{.Node.Hostname}}"
+    # у воркера нет HTTP-порта, поэтому проверка из Dockerfile (запрос к API)
+    # заменена на проверку отметки жизни, которую воркер обновляет в каждом цикле
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/worker-heartbeat') < 30 else 1)"]
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 30s
     environment:
       DB_HOST: postgres
       DB_USER: bizflow
@@ -127,7 +140,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    # Очередь событий не должна вытесняться при нехватке памяти. Политика
+    # volatile-lru вытесняет только ключи со сроком жизни (кэш статистики),
+    # списки очереди срока жизни не имеют. AOF сбрасывается на диск раз в секунду.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec",
+              "--maxmemory", "128mb", "--maxmemory-policy", "volatile-lru"]
     volumes:
       - redisdata:/data
     networks: [backend]

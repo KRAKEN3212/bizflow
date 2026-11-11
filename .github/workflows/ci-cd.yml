@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -84,9 +85,55 @@ jobs:
             ${{ steps.meta.outputs.registry }}/bizflow-frontend:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.registry }}/bizflow-frontend:latest
 
-  deploy:
-    name: Развёртывание в облаке
+  cloud-test:
+    name: Развёртывание и проверка в облачной среде
+    # Временный кластер Swarm на облачной виртуальной машине GitHub Actions:
+    # стек разворачивается из только что опубликованных образов, проверяется
+    # и удаляется вместе с машиной после завершения задания.
     needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      REGISTRY: ${{ needs.build.outputs.registry }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сведения о машине
+        run: |
+          echo "Узел: $(hostname), $(nproc) vCPU, $(free -h | awk '/Mem/ {print $2}') ОЗУ"
+          docker version --format 'Docker Engine {{.Server.Version}}'
+      - name: Вход в GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Инициализация Swarm и секретов
+        run: |
+          docker swarm init
+          docker node update --label-add tier=main "$(docker info --format '{{.Swarm.NodeID}}')"
+          for s in db_password jwt_secret grafana_password; do
+            openssl rand -hex 24 | docker secret create "$s" -
+          done
+      - name: Развёртывание стека
+        run: docker stack deploy --with-registry-auth -c docker-stack.yml bizflow
+      - name: Проверка результата развёртывания
+        run: TIMEOUT=300 bash scripts/check-deploy.sh
+      - name: Тестовые данные
+        run: docker exec "$(docker ps -qf name=bizflow_api | head -1)" python -m app.seed
+      - name: Дымовой тест
+        run: python3 scripts/smoke.py --url http://127.0.0.1
+      - name: Масштабирование api до 5 реплик и нагрузка
+        run: |
+          docker service scale --detach=false bizflow_api=5
+          python3 scripts/loadtest.py --url http://127.0.0.1 --threads 10 --seconds 20
+      - name: Состояние стека
+        if: always()
+        run: |
+          docker stack services bizflow || true
+          docker stack ps bizflow --no-trunc --format '{{.Name}} | {{.Image}} | {{.CurrentState}} | {{.Error}}' || true
+
+  deploy:
+    name: Развёртывание на постоянный сервер
+    needs: [build, cloud-test]
     if: needs.build.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     environment: production
@@ -98,7 +145,7 @@ jobs:
           host: ${{ secrets.SWARM_HOST }}
           username: ${{ secrets.SWARM_USER }}
           key: ${{ secrets.SWARM_SSH_KEY }}
-          source: "docker-stack.yml,monitoring"
+          source: "docker-stack.yml,monitoring,scripts"
           target: /opt/bizflow
       - name: Обновление стека
         uses: appleboy/ssh-action@v1.2.0
@@ -111,10 +158,4 @@ jobs:
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
             export REGISTRY=${{ needs.build.outputs.registry }} TAG=${{ needs.build.outputs.tag }}
             docker stack deploy --with-registry-auth -c docker-stack.yml bizflow
-            # ожидание, пока все реплики API перейдут на новую версию
-            for i in $(seq 1 30); do
-              running=$(docker service ps bizflow_api --filter desired-state=running --format '{{.Image}} {{.CurrentState}}' | grep -c "$TAG.*Running" || true)
-              [ "$running" -ge 3 ] && break
-              sleep 5
-            done
-            curl -fsS http://localhost/api/health
+            TIMEOUT=300 bash scripts/check-deploy.sh
