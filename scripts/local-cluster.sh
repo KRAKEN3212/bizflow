@@ -8,14 +8,17 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1   # для Git Bash в Windows
 
-docker network inspect swarm-lab >/dev/null 2>&1 || docker network create swarm-lab >/dev/null
+# Адреса узлов закреплены: без этого после перезапуска Docker контейнеры
+# получают IP в другом порядке и рабочие узлы теряют менеджера.
+docker network inspect swarm-lab >/dev/null 2>&1 || docker network create --subnet 172.20.0.0/24 swarm-lab >/dev/null
+MANAGER_IP=172.20.0.2
 
-docker run -d --privileged --name swarm-manager --hostname manager --network swarm-lab \
+docker run -d --privileged --name swarm-manager --hostname manager --network swarm-lab --ip "$MANAGER_IP" \
   -e DOCKER_TLS_CERTDIR= --restart unless-stopped \
   -p 127.0.0.1:80:80 -p 127.0.0.1:3000:3000 -p 127.0.0.1:9090:9090 -p 127.0.0.1:8081:8081 \
   docker:29-dind >/dev/null
 for n in 1 2; do
-  docker run -d --privileged --name "swarm-worker-$n" --hostname "worker-$n" --network swarm-lab \
+  docker run -d --privileged --name "swarm-worker-$n" --hostname "worker-$n" --network swarm-lab --ip "172.20.0.$((n + 2))" \
     -e DOCKER_TLS_CERTDIR= --restart unless-stopped docker:29-dind >/dev/null
 done
 
@@ -23,7 +26,6 @@ for c in swarm-manager swarm-worker-1 swarm-worker-2; do
   until docker exec "$c" docker info >/dev/null 2>&1; do sleep 2; done
 done
 
-MANAGER_IP=$(docker exec swarm-manager hostname -i | awk '{print $1}')
 docker exec swarm-manager docker swarm init --advertise-addr "$MANAGER_IP" >/dev/null
 TOKEN=$(docker exec swarm-manager docker swarm join-token -q worker)
 for n in 1 2; do
