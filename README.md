@@ -105,6 +105,7 @@ python scripts/loadtest.py --ci --max-error-rate 0.01  # код 1 при оши�
 python scripts/availability.py --seconds 120      # зонд доступности (фиксирует неуспешные проверки)
 TAG=1.2.0 bash scripts/check-deploy.sh             # проверка результата деплоя
 python scripts/smoke.py                            # дымовой тест
+bash scripts/rotate-db-password.sh                 # смена пароля БД: секрет + ALTER USER
 ```
 
 Резервная копия базы:

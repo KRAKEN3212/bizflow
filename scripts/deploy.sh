@@ -10,6 +10,11 @@ export TAG=${TAG:-1.0.0}
 # версия конфигураций мониторинга = хеш их содержимого (см. configs в docker-stack.yml)
 CONFIG_VERSION=$(find monitoring -type f -exec sha1sum {} + | sort -k2 | sha1sum | cut -c1-10)
 export CONFIG_VERSION
+# имя секрета с паролем БД берётся из работающего сервиса (меняется после rotate-db-password.sh)
+if [ -z "${DB_PASSWORD_SECRET:-}" ]; then
+  DB_PASSWORD_SECRET=$(docker service inspect bizflow_api --format     '{{range .Spec.TaskTemplate.ContainerSpec.Secrets}}{{if eq .File.Name "db_password"}}{{.SecretName}}{{end}}{{end}}' 2>/dev/null || true)
+fi
+export DB_PASSWORD_SECRET=${DB_PASSWORD_SECRET:-db_password}
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   docker build --build-arg APP_VERSION="$TAG" -t "$REGISTRY/bizflow-api:$TAG" backend

@@ -217,6 +217,8 @@ volumes:
 secrets:
   db_password:
     external: true
+    # после scripts/rotate-db-password.sh секрет называется db_password_<время>
+    name: ${DB_PASSWORD_SECRET:-db_password}
   jwt_secret:
     external: true
   grafana_password:
