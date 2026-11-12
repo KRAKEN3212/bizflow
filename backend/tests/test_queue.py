@@ -85,3 +85,40 @@ def test_failed_event_goes_to_dead_list(r, company, monkeypatch):
     assert r.llen(events.DEAD) == 1
     assert json.loads(r.lindex(events.DEAD, 0))["attempt"] == events.MAX_ATTEMPTS
     assert r.llen(events.QUEUE) == 0 and r.llen(events.PROCESSING) == 0
+
+
+def test_integrity_error_without_duplicate_is_not_swallowed(company, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    event = {"id": "fk1", "kind": "client.created", "company_id": company, "name": "Ошибка БД"}
+    with SessionLocal() as db:
+        def broken_commit():
+            raise IntegrityError("INSERT", {}, Exception("нарушение внешнего ключа"))
+        monkeypatch.setattr(db, "commit", broken_commit)
+        with pytest.raises(IntegrityError):
+            handle_event(db, event, "test")
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(EventLog).where(EventLog.event_id == "fk1")) == 0
+
+
+def test_worker_retries_event_after_integrity_error(r, company, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    _push(r, company, "fk2")
+
+    def boom(*args, **kwargs):
+        raise IntegrityError("INSERT", {}, Exception("нарушение внешнего ключа"))
+
+    monkeypatch.setattr(worker, "handle_event", boom)
+    monkeypatch.setattr(worker.time, "sleep", lambda s: None)
+    worker.process_one(r, timeout=0.1)
+    # событие не подтверждено как обработанное, а возвращено в очередь
+    assert r.llen(events.PROCESSING) == 0
+    assert json.loads(r.lindex(events.QUEUE, 0))["attempt"] == 1
+
+
+def test_deal_lost_for_deleted_deal_creates_no_task(company):
+    event = {"id": "lost1", "kind": "deal.lost", "company_id": company, "deal_id": 999999}
+    with SessionLocal() as db:
+        assert handle_event(db, event, "test") is True
+    assert _tasks(company) == 0

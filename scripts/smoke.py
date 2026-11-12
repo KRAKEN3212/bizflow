@@ -37,6 +37,14 @@ def wait_task(base, token, predicate, seconds=30):
     return None
 
 
+def processed_event(base, token, predicate):
+    """Запись журнала автоматизации (/api/events) для события; в поле processed_by
+    имя реплики воркера или «<реплика api> (inline)» для резервной обработки без Redis."""
+    _, events, _ = call(base, "GET", "/api/events", token=token)
+    found = [e for e in events or [] if predicate(e)]
+    return found[0] if found else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1")
@@ -63,12 +71,18 @@ def main() -> int:
     status, client, _ = call(base, "POST", "/api/clients", {"name": name}, token)
     check("создание клиента", status == 201)
     task = wait_task(base, token, lambda t: t["source"] == "automation" and name in t["title"])
-    check("воркер создал задачу по событию client.created", task is not None, task["title"] if task else "")
+    check("правило создало задачу по событию client.created", task is not None, task["title"] if task else "")
+    ev = processed_event(base, token, lambda e: e["kind"] == "client.created" and name in e["payload"])
+    check("событие client.created обработал воркер из очереди, а не резервный обработчик API",
+          ev is not None and not ev["processed_by"].endswith("(inline)"), ev["processed_by"] if ev else "события нет в журнале")
 
     status, deal, _ = call(base, "POST", "/api/deals", {"title": name, "amount": 1000, "stage": "won", "client_id": client["id"]}, token)
     check("создание сделки сразу со статусом «Успешно»", status == 201)
     task = wait_task(base, token, lambda t: t["source"] == "automation" and t["deal_id"] == deal["id"])
-    check("воркер создал задачу по событию deal.won", task is not None, task["title"] if task else "")
+    check("правило создало задачу по событию deal.won", task is not None, task["title"] if task else "")
+    ev = processed_event(base, token, lambda e: e["kind"] == "deal.won" and f'"deal_id": {deal["id"]}' in e["payload"])
+    check("событие deal.won обработал воркер из очереди, а не резервный обработчик API",
+          ev is not None and not ev["processed_by"].endswith("(inline)"), ev["processed_by"] if ev else "события нет в журнале")
 
     status, _, _ = call(base, "DELETE", f"/api/deals/{deal['id']}", token=token)
     status2, _, _ = call(base, "DELETE", f"/api/clients/{client['id']}", token=token)

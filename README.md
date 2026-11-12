@@ -34,7 +34,8 @@ BLMOVE в список `bizflow:processing` и удаляет его оттуд�
 Зависшие события (воркер упал) через 60 секунд возвращаются в очередь, после пяти
 неудачных попыток событие попадает в `bizflow:dead`. Доставка выполняется «хотя бы
 один раз»; повтор не создаёт дубликатов, потому что у каждого события есть
-идентификатор с уникальным индексом в таблице `event_log`.
+идентификатор с уникальным индексом в таблице `event_log`. Другие ошибки целостности
+базы данных дубликатом не считаются: событие возвращается в очередь для повторной попытки.
 
 Ограничения: событие отправляется в Redis после фиксации транзакции, и при падении
 реплики API между этими действиями оно теряется (transactional outbox не реализован);
@@ -100,7 +101,7 @@ docker service rollback bizflow_api                # ручной откат
 docker node update --availability drain worker-1   # вывод узла на обслуживание
 docker service logs -f bizflow_worker              # журналы
 python scripts/loadtest.py --threads 20 --seconds 60
-python scripts/availability.py --seconds 120      # доступность во время обновления
+python scripts/availability.py --seconds 120      # зонд доступности (фиксирует неуспешные проверки)
 TAG=1.2.0 bash scripts/check-deploy.sh             # проверка результата деплоя
 python scripts/smoke.py                            # дымовой тест
 ```

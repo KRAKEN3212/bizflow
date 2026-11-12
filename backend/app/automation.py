@@ -45,13 +45,15 @@ def handle_event(db: Session, event: dict, processed_by: str) -> bool:
                 source="automation",
             ))
     elif kind == "deal.lost":
-        db.add(Task(
-            company_id=company_id,
-            deal_id=event["deal_id"],
-            title="Запросить у клиента причину отказа",
-            due_date=date.today() + timedelta(days=3),
-            source="automation",
-        ))
+        # сделку могли удалить до обработки события: тогда задача не нужна
+        if db.get(Deal, event["deal_id"]) is not None:
+            db.add(Task(
+                company_id=company_id,
+                deal_id=event["deal_id"],
+                title="Запросить у клиента причину отказа",
+                due_date=date.today() + timedelta(days=3),
+                source="automation",
+            ))
 
     db.add(EventLog(
         event_id=event_id,
@@ -63,8 +65,13 @@ def handle_event(db: Session, event: dict, processed_by: str) -> bool:
     try:
         db.commit()
     except IntegrityError:
-        # то же событие одновременно обработал другой воркер
         db.rollback()
-        log.info("Событие %s уже записано другим воркером", event_id)
-        return False
+        # Дубликатом считается только случай, когда запись с этим event_id уже
+        # есть (то же событие одновременно обработал другой воркер). Любое другое
+        # нарушение целостности передаётся дальше: воркер повторит попытку,
+        # а после исчерпания попыток отправит событие в dead-список.
+        if event_id and db.scalar(select(EventLog.id).where(EventLog.event_id == event_id)):
+            log.info("Событие %s уже записано другим воркером", event_id)
+            return False
+        raise
     return True

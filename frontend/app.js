@@ -219,14 +219,16 @@ const FORMS = {
 
 async function openForm(kind, obj = null) {
   const f = FORMS[kind];
-  if (kind === "deal" && !clientsCache.length) clientsCache = await api("/clients");
+  // справочник клиентов для формы сделки загружается полностью при каждом
+  // открытии: clientsCache содержит результат поиска в таблице и может быть неполным
+  const clientOptions = kind === "deal" ? await api("/clients") : [];
   $("#modal-title").textContent = (obj ? "Изменить: " : "Новый объект: ") + f.title.toLowerCase();
   $("#modal-error").textContent = "";
   $("#modal-fields").innerHTML = f.fields.map(([name, label, type, req]) => {
     const v = obj?.[name] ?? "";
     let input;
     if (type === "textarea") input = `<textarea name="${name}">${esc(v)}</textarea>`;
-    else if (type === "client") input = `<select name="${name}"><option value="">— без клиента —</option>${clientsCache.map((c) => `<option value="${c.id}" ${c.id === v ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>`;
+    else if (type === "client") input = `<select name="${name}"><option value="">— без клиента —</option>${clientOptions.map((c) => `<option value="${c.id}" ${c.id === v ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>`;
     else if (type === "stage") input = `<select name="${name}">${Object.entries(STAGES).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
     else if (type === "role") input = `<select name="${name}"><option value="manager">Менеджер</option><option value="admin">Администратор</option></select>`;
     else input = `<input name="${name}" type="${type}" value="${esc(v)}" ${req ? "required" : ""}>`;
