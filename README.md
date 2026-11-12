@@ -100,7 +100,8 @@ TAG=1.1.0 bash scripts/deploy.sh                   # обновление по �
 docker service rollback bizflow_api                # ручной откат
 docker node update --availability drain worker-1   # вывод узла на обслуживание
 docker service logs -f bizflow_worker              # журналы
-python scripts/loadtest.py --threads 20 --seconds 60
+python scripts/loadtest.py --threads 20 --seconds 60   # нагрузка, только измерение
+python scripts/loadtest.py --ci --max-error-rate 0.01  # код 1 при ошибках > 1 % или без успешных
 python scripts/availability.py --seconds 120      # зонд доступности (фиксирует неуспешные проверки)
 TAG=1.2.0 bash scripts/check-deploy.sh             # проверка результата деплоя
 python scripts/smoke.py                            # дымовой тест

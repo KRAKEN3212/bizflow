@@ -1,12 +1,19 @@
 """Простой нагрузочный тест BizFlow без сторонних библиотек.
 
     python scripts/loadtest.py --url http://127.0.0.1 --threads 20 --seconds 60
+    python scripts/loadtest.py --ci --max-error-rate 0.01   # режим проверки для CI
 
 Скрипт входит под демо-пользователем, затем несколько потоков параллельно
 запрашивают сводку, списки клиентов и сделок. В конце выводится число
 запросов, ошибок, перцентили времени ответа и распределение запросов
-по репликам API (по заголовку X-Served-By)."""
+по репликам API (по заголовку X-Served-By).
+
+Без флага --ci скрипт только измеряет и всегда завершается с кодом 0: так он
+используется в экспериментах с отключением узла, где ошибки ожидаемы.
+С флагом --ci скрипт завершается с кодом 1, если не было ни одного успешного
+запроса или доля ошибок превысила --max-error-rate."""
 import argparse
+import sys
 import collections
 import json
 import statistics
@@ -26,11 +33,27 @@ def login(base: str) -> str:
         return json.load(resp)["access_token"]
 
 
-def main() -> None:
+def check(ok: int, failed: int, max_error_rate: float) -> list[str]:
+    """Условия режима --ci; возвращает список нарушений (пустой, если всё в порядке)."""
+    problems = []
+    if ok == 0:
+        problems.append("нет ни одного успешного запроса")
+    total = ok + failed
+    rate = failed / total if total else 1.0
+    if rate > max_error_rate:
+        problems.append(f"доля ошибок {rate * 100:.2f} % больше допустимой {max_error_rate * 100:.2f} %")
+    return problems
+
+
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1")
     ap.add_argument("--threads", type=int, default=20)
     ap.add_argument("--seconds", type=int, default=60)
+    ap.add_argument("--ci", action="store_true",
+                    help="завершиться с кодом 1 при превышении доли ошибок или без успешных запросов")
+    ap.add_argument("--max-error-rate", type=float, default=0.01,
+                    help="допустимая доля ошибок в режиме --ci (по умолчанию 0.01, то есть 1 %%)")
     args = ap.parse_args()
 
     token = login(args.url)
@@ -81,6 +104,15 @@ def main() -> None:
     for inst, n in sorted(by_instance.items()):
         print(f"  {inst:<22} {n:>7}  ({n / max(total, 1) * 100:.1f} %)")
 
+    if not args.ci:
+        return 0
+    problems = check(total, sum(errors.values()), args.max_error_rate)
+    if problems:
+        print("ПРОВЕРКА НЕ ПРОЙДЕНА: " + "; ".join(problems))
+        return 1
+    print(f"Проверка пройдена: доля ошибок не больше {args.max_error_rate * 100:.2f} %")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
