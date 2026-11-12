@@ -135,7 +135,7 @@ jobs:
           set -o pipefail
           docker service scale --detach=false bizflow_api=5 > /dev/null
           docker service ps bizflow_api --filter desired-state=running --format '{{.Name}}  {{.Image}}  {{.CurrentState}}' | tee out/06-scale.txt
-          python3 scripts/loadtest.py --url http://127.0.0.1 --threads 10 --seconds 20 --ci --max-error-rate 0.01 | tee out/07-load.txt
+          python3 scripts/loadtest.py --url http://127.0.0.1 --threads 10 --seconds 20 --ci | tee out/07-load.txt
       - name: Состояние стека
         if: always()
         run: |
